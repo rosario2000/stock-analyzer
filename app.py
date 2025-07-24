@@ -178,7 +178,7 @@ def analyze_stock(symbol, mode, StockAnalyzer):
         try:
             # Initialize analyzer based on mode
             use_lstm = mode == "LSTM + Statistical"
-            analyzer = StockAnalyzer(use_lstm=use_lstm, use_ensemble=use_lstm)
+            analyzer = StockAnalyzer(use_lstm=use_lstm)
             
             # Perform analysis
             results = analyzer.analyze_stocks([symbol])
