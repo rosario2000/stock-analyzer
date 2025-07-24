@@ -5,7 +5,7 @@ st.title("🚀 Stock Analyzer")
 # Test basic functionality
 symbol = st.text_input("Enter Stock Symbol:", "KPITTECH.BSE")
 
-if st.button("Test Basic Functionality"):
+if st.button("Analyze"):
     st.write("Testing import...")
     try:
         from stock_analyzer import StockAnalyzer
