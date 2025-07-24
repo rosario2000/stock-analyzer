@@ -540,7 +540,7 @@ class StockAnalyzer:
         # Combine all factors to create adaptive weights
         weights = {}
         
-        for horizon in ['1d', '1w', '1m']:
+        for horizon in ['1d', '1w', '1m', '1y']:
             # Calculate confidence multiplier for this horizon
             confidence_multiplier = (
                 0.3 * lstm_consistency +     # 30% based on LSTM consistency
@@ -643,7 +643,8 @@ class StockAnalyzer:
         return {
             '1d': 0.6,   # Statistical methods often better for very short term
             '1w': 0.8,   # LSTM starts to shine at weekly predictions  
-            '1m': 1.0    # LSTM generally best for monthly predictions
+            '1m': 1.0,   # LSTM generally best for monthly predictions
+            '1y': 1.1    # LSTM excellent for yearly predictions
         }
     
     def calculate_upside_movements(self, time_series: Dict, symbol: str = "") -> Dict:
@@ -700,7 +701,7 @@ class StockAnalyzer:
         
         # LSTM Enhanced Predictions
         lstm_predictions = None
-        lstm_upside_1d, lstm_upside_1w, lstm_upside_1m = 0, 0, 0
+        lstm_upside_1d, lstm_upside_1w, lstm_upside_1m, lstm_upside_1y = 0, 0, 0, 0
         prediction_method = "Statistical"
         hybrid_weights = None
         
@@ -717,9 +718,9 @@ class StockAnalyzer:
                         print(f"    🎯 Training ensemble models...")
                         models = self.train_ensemble_models(X_train, y_train)
                         
-                        # Make ensemble predictions with confidence intervals
+                        # Make ensemble predictions with confidence intervals (extended to 1 year)
                         last_sequence = scaled_data[-self.lstm_lookback:]
-                        ensemble_results = self.predict_with_ensemble(models, last_sequence, scaler, days_ahead=30)
+                        ensemble_results = self.predict_with_ensemble(models, last_sequence, scaler, days_ahead=365)
                         lstm_predictions = ensemble_results['mean_predictions']
                         
                         # Store additional ensemble metrics
@@ -734,9 +735,9 @@ class StockAnalyzer:
                         # Single model training
                         model = self.train_lstm_model(X_train, y_train)
                         
-                        # Make predictions
+                        # Make predictions (extended to 1 year)
                         last_sequence = scaled_data[-self.lstm_lookback:]
-                        lstm_predictions = self.predict_with_lstm(model, last_sequence, scaler, days_ahead=30)
+                        lstm_predictions = self.predict_with_lstm(model, last_sequence, scaler, days_ahead=365)
                         prediction_std = np.std(lstm_predictions[:7])  # Use weekly std as approximation
                         confidence_intervals = None
                     
@@ -744,6 +745,7 @@ class StockAnalyzer:
                     lstm_upside_1d = max(0, (lstm_predictions[0] - latest_close) / latest_close * 100)
                     lstm_upside_1w = max(0, (np.max(lstm_predictions[:7]) - latest_close) / latest_close * 100)
                     lstm_upside_1m = max(0, (np.max(lstm_predictions[:30]) - latest_close) / latest_close * 100)
+                    lstm_upside_1y = max(0, (np.max(lstm_predictions[:365]) - latest_close) / latest_close * 100)
                     
                     # Risk-adjusted upside calculations
                     if self.use_risk_adjustment:
@@ -780,6 +782,7 @@ class StockAnalyzer:
         stat_upside_1d = (recent_volatility_5d if not pd.isna(recent_volatility_5d) else 2.0) * trend_multiplier
         stat_upside_1w = (recent_volatility_20d * 2.5 if not pd.isna(recent_volatility_20d) else 5.0) * trend_multiplier
         stat_upside_1m = (recent_volatility_20d * 4.0 if not pd.isna(recent_volatility_20d) else 8.0) * trend_multiplier
+        stat_upside_1y = (recent_volatility_20d * 12.0 if not pd.isna(recent_volatility_20d) else 25.0) * trend_multiplier
         
         # Advanced Hybrid Prediction System
         if self.use_lstm and lstm_predictions is not None:
@@ -795,6 +798,8 @@ class StockAnalyzer:
                         hybrid_weights['stat_1w'] * stat_upside_1w)
             upside_1m = (hybrid_weights['lstm_1m'] * lstm_upside_1m + 
                         hybrid_weights['stat_1m'] * stat_upside_1m)
+            upside_1y = (hybrid_weights['lstm_1y'] * lstm_upside_1y + 
+                        hybrid_weights['stat_1y'] * stat_upside_1y)
                         
             prediction_method = f"Adaptive-Hybrid (L:{hybrid_weights['lstm_1m']:.1f}/S:{hybrid_weights['stat_1m']:.1f})"
         else:
@@ -802,11 +807,13 @@ class StockAnalyzer:
             upside_1d = stat_upside_1d
             upside_1w = stat_upside_1w
             upside_1m = stat_upside_1m
+            upside_1y = stat_upside_1y
         
         # Cap the upside movements to reasonable values
         upside_1d = min(max(upside_1d, 0), 15.0)  # Max 15% daily
         upside_1w = min(max(upside_1w, 0), 35.0)  # Max 35% weekly
         upside_1m = min(max(upside_1m, 0), 60.0)  # Max 60% monthly
+        upside_1y = min(max(upside_1y, 0), 200.0)  # Max 200% yearly
         
         # Enhanced trend classification
         lstm_trend = ""
@@ -828,6 +835,7 @@ class StockAnalyzer:
             'upside_1_day': round(upside_1d, 2),
             'upside_1_week': round(upside_1w, 2),
             'upside_1_month': round(upside_1m, 2),
+            'upside_1_year': round(upside_1y, 2),
             'current_trend': combined_trend,
             'volatility_20d': round(recent_volatility_20d if not pd.isna(recent_volatility_20d) else 0, 2),
             'prediction_method': prediction_method
@@ -841,6 +849,7 @@ class StockAnalyzer:
                 'lstm_1d_target': round(lstm_predictions[0], 2),
                 'lstm_1w_max': round(np.max(lstm_predictions[:7]), 2),
                 'lstm_1m_max': round(np.max(lstm_predictions[:30]), 2),
+                'lstm_1y_max': round(np.max(lstm_predictions[:365]), 2),
                 'lstm_confidence': round(base_confidence, 1)
             })
             
@@ -982,6 +991,7 @@ class StockAnalyzer:
             'Upside 1 Day (%)',
             'Upside 1 Week (%)',
             'Upside 1 Month (%)',
+            'Upside 1 Year (%)',
             'Current Trend',
             'Volatility 20D (%)',
             'Prediction Method',
@@ -1024,9 +1034,10 @@ class StockAnalyzer:
                     result['status'],
                     result['latest_close'],
                     result['latest_date'],
-                    result['upside_1_day'],
-                    result['upside_1_week'],
-                    result['upside_1_month'],
+                                    result['upside_1_day'],
+                result['upside_1_week'], 
+                result['upside_1_month'],
+                result['upside_1_year'],
                     result['current_trend'],
                     result['volatility_20d'],
                     result.get('prediction_method', 'N/A'),
